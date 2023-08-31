@@ -23,7 +23,9 @@ namespace bustub {
 
 template <typename K, typename V>
 ExtendibleHashTable<K, V>::ExtendibleHashTable(size_t bucket_size)
-    : global_depth_(0), bucket_size_(bucket_size), num_buckets_(1) {}
+    : global_depth_(0), bucket_size_(bucket_size), num_buckets_(1) {
+  dir_.emplace_back(std::make_shared<Bucket>(bucket_size));
+}
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::IndexOf(const K &key) -> size_t {
@@ -67,78 +69,76 @@ auto ExtendibleHashTable<K, V>::GetNumBucketsInternal() const -> int {
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::Find(const K &key, V &value) -> bool {
   std::scoped_lock<std::mutex> lock(latch_);
-  //获取与key对应的bucket
-  size_t index = ExtendibleHashTable<K,V>::IndexOf(key);
-  std::shared_ptr<Bucket> curBucket = dir_[index];
-  //对应bucket查找
-  return curBucket->Find(key,value);
+  // 获取与key对应的bucket
+  size_t index = ExtendibleHashTable<K, V>::IndexOf(key);
+  std::shared_ptr<Bucket> cur_bucket = dir_[index];
+  // 对应bucket查找
+  return cur_bucket->Find(key, value);
 }
 
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::Remove(const K &key) -> bool {
-    //Todo : 加锁
+  // Todo : 加锁
   std::scoped_lock<std::mutex> lock(latch_);
-  //获取与key对应的bucket
-  size_t index = ExtendibleHashTable<K,V>::IndexOf(key);
-  std::shared_ptr<Bucket> curBucket = dir_[index];
-  return curBucket->Remove(key);
+  // 获取与key对应的bucket
+  size_t index = ExtendibleHashTable<K, V>::IndexOf(key);
+  std::shared_ptr<Bucket> cur_bucket = dir_[index];
+  return cur_bucket->Remove(key);
 }
 
-template <typename K, typename V>
-void ExtendibleHashTable<K, V>::RedistributeBucket(std::shared_ptr<Bucket> bucket){
-  //拆分成两个bucket
- 
-  auto curList = bucket->GetItems();
-  bucket->IncrementDepth();
-  auto curDepth = bucket->GetDepth(); 
-  std::shared_ptr<Bucket> bucket1(new Bucket(bucket_size_,curDepth));
-  ++num_buckets_;
-  size_t preidx = std::hash<K>()((curList.begin())->first) & ((1 << (curDepth - 1)) - 1);
-  //根据key和curDepth对bucket进行shuffle
-  for(auto i = curList.begin(); i!= curList.end();i++){
-    auto key = i->first;
-    auto curIndex = std::hash<K>()(key) & ((1 << (curDepth - 1)) - 1);
-    if(curIndex != preidx){
-      bucket1->Insert(key,i->second);
-      curList.erase(i);
-    } 
-  }
-   for (size_t i = 0; i < dir_.size(); i++) {
-    // 1xxx
-    if ((i & ((1 << (curDepth - 1)) - 1)) == preidx && (i & ((1 << curDepth) - 1)) != preidx) {
-      dir_[i] = bucket1;
-    }
-  }
-  return;
-}
+// * @brief Insert the given key-value pair into the hash table.
+//  * If a key already exists, the value should be updated.
+//  * If the bucket is full and can't be inserted, do the following steps before retrying:
+//  *    1. If the local depth of the bucket is equal to the global depth,
+//  *        increment the global depth and double the size of the directory.
+//  *    2. Increment the local depth of the bucket.
+//  *    3. Split the bucket and redistribute directory pointers & the kv pairs in the bucket.
 
-  // * @brief Insert the given key-value pair into the hash table.
-  //  * If a key already exists, the value should be updated.
-  //  * If the bucket is full and can't be inserted, do the following steps before retrying:
-  //  *    1. If the local depth of the bucket is equal to the global depth,
-  //  *        increment the global depth and double the size of the directory.
-  //  *    2. Increment the local depth of the bucket.
-  //  *    3. Split the bucket and redistribute directory pointers & the kv pairs in the bucket.
-   
 template <typename K, typename V>
 void ExtendibleHashTable<K, V>::Insert(const K &key, const V &value) {
   std::scoped_lock<std::mutex> lock(latch_);
-  while(true){
-    size_t index = IndexOf(key);
-    bool flag = dir_[index]->Insert(key,value);
-    if(flag){
-      break;
-    }
-    if(GetLocalDepthInternal(index) != GetGlobalDepthInternal()) {
-      RedistributeBucket(dir_[index]);
-    } else {
+  while (dir_[IndexOf(key)]->IsFull()) {
+    auto index = IndexOf(key);
+    auto target_bucket = dir_[index];
+    if (target_bucket->GetDepth() == GetGlobalDepthInternal()) {
       global_depth_++;
-      size_t dir_size = dir_.size();
-      for (size_t i = 0; i < dir_size; i++) {
-        dir_.emplace_back(dir_[i]);
+      int capacity = dir_.size();
+      dir_.resize(capacity << 1);
+      for (int i = 0; i < capacity; i++) {
+        dir_[i + capacity] = dir_[i];
+      }
+    }
+    int mask = 1 << target_bucket->GetDepth();
+    auto bucket_0 = std::make_shared<Bucket>(bucket_size_, target_bucket->GetDepth() + 1);
+    auto bucket_1 = std::make_shared<Bucket>(bucket_size_, target_bucket->GetDepth() + 1);
+    for (const auto &item : target_bucket->GetItems()) {
+      size_t hash_key = std::hash<K>()(item.first);
+      if ((hash_key & mask) != 0U) {
+        bucket_1->Insert(item.first, item.second);
+      } else {
+        bucket_0->Insert(item.first, item.second);
+      }
+    }
+    num_buckets_++;
+    for (size_t i = 0; i < dir_.size(); i++) {
+      if (dir_[i] == target_bucket) {
+        if ((i & mask) != 0U) {
+          dir_[i] = bucket_1;
+        } else {
+          dir_[i] = bucket_0;
+        }
       }
     }
   }
+  auto index = IndexOf(key);
+  auto target_bucket = dir_[index];
+  for (auto &item : target_bucket->GetItems()) {
+    if (item.first == key) {
+      item.second = value;
+      return;
+    }
+  }
+  target_bucket->Insert(key, value);
 }
 
 //===--------------------------------------------------------------------===//
@@ -161,11 +161,12 @@ auto ExtendibleHashTable<K, V>::Bucket::Find(const K &key, V &value) -> bool {
 template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::Bucket::Remove(const K &key) -> bool {
   auto it = list_.begin();
-  for(; it != list_.end(); it++){
-    if(it->first == key){
-      list_.erase(it);
+  for (; it != list_.end();) {
+    if (it->first == key) {
+      list_.erase(it++);
       return true;
     }
+    ++it;
   }
   return false;
 }
@@ -174,8 +175,8 @@ template <typename K, typename V>
 auto ExtendibleHashTable<K, V>::Bucket::Insert(const K &key, const V &value) -> bool {
   //  //Todo : 加锁
   auto it = list_.begin();
-  for(; it != list_.end(); it++){
-    if(it->first == key){
+  for (; it != list_.end(); it++) {
+    if (it->first == key) {
       it->second = value;
       return true;
     }

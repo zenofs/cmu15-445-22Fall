@@ -292,7 +292,8 @@ class Trie {
     }
     latch_.WLock();
     /* the problem is how to process the unique_ptr???????
-    // A  point to the unique_ptr so that we can acess unique_qtr's data without making copies or giving up ownership!!!! */
+    // A  point to the unique_ptr so that we can acess unique_qtr's data without making copies or giving up
+    ownership!!!! */
     auto tmp = &root_;
     // traverse the key
     for (int i = 0; i < key_size - 1; i++) {
@@ -302,7 +303,7 @@ class Trie {
         tmp = tmp->get()->GetChildNode(key[i]);
       }
     }
-   
+
     /************
     (*parent)->InsertChildNode(key[key_size - 1],
                                     std::move(std::make_unique<TrieNodeWithValue<T>>((std::move(**new_node), value))));

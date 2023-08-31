@@ -149,7 +149,6 @@ class LRUKReplacer {
   std::unordered_map<frame_id_t, std::list<frame_id_t>::iterator> cache_map_;
 
   std::unordered_map<frame_id_t, bool> is_evictable_;
-
 };
 
 }  // namespace bustub

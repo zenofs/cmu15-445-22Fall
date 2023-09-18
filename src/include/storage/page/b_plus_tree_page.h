@@ -19,7 +19,7 @@
 #include "storage/index/generic_key.h"
 
 namespace bustub {
-
+enum Operation { READ, INSERT, DELETE };
 #define MappingType std::pair<KeyType, ValueType>
 
 #define INDEX_TEMPLATE_ARGUMENTS template <typename KeyType, typename ValueType, typename KeyComparator>

@@ -124,7 +124,7 @@ class Catalog {
    * @return A (non-owning) pointer to the metadata for the table
    */
   auto CreateTable(Transaction *txn, const std::string &table_name, const Schema &schema, bool create_table_heap = true)
-      -> TableInfo * {
+      -> TableInfo * { 
     if (table_names_.count(table_name) != 0) {
       return NULL_TABLE_INFO;
     }
